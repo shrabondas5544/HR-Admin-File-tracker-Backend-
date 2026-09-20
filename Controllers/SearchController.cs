@@ -87,8 +87,14 @@ public class SearchController : ControllerBase
                         using var doc = JsonDocument.Parse(file.MetadataJson);
                         if (doc.RootElement.TryGetProperty("department", out var dept)) subtitleParts.Add(dept.GetString() ?? "");
                         if (doc.RootElement.TryGetProperty("designation", out var desig)) subtitleParts.Add(desig.GetString() ?? "");
-                        if (doc.RootElement.TryGetProperty("employeeNo", out var empNo) && !string.IsNullOrEmpty(empNo.GetString())) subtitleParts.Add($"ID: {empNo.GetString()}");
-                        else if (doc.RootElement.TryGetProperty("staffId", out var staffId) && !string.IsNullOrEmpty(staffId.GetString())) subtitleParts.Add($"Staff ID: {staffId.GetString()}");
+                        if (doc.RootElement.TryGetProperty("employeeNo", out var empNo) && !string.IsNullOrEmpty(empNo.GetString()))
+                        {
+                            subtitleParts.Add($"ID: {empNo.GetString()}");
+                        }
+                        else if (doc.RootElement.TryGetProperty("staffId", out var staffId) && !string.IsNullOrEmpty(staffId.GetString()))
+                        {
+                            subtitleParts.Add($"Staff ID: {staffId.GetString()}");
+                        }
                     }
                     catch { }
 
