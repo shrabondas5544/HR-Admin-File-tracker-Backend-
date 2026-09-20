@@ -25,6 +25,12 @@ public static class DbInitializer
         // Check if already seeded
         if (context.Cabinets.Any())
         {
+            try
+            {
+                context.Database.ExecuteSqlRaw("UPDATE Cabinets SET Description = '' WHERE Description LIKE '%Wall 1%';");
+            }
+            catch { }
+
             var existingBll = context.DocumentTypes.FirstOrDefault(d => d.Name == "BLL");
             if (existingBll != null && existingBll.FieldsJson.Contains("location"))
             {
@@ -95,7 +101,7 @@ public static class DbInitializer
             {
                 CabinetNumber = c,
                 Name = $"Cabinet {c}",
-                Description = $"Wall 1 - Full-height Archive Unit {c}"
+                Description = ""
             };
 
             // 4 Upper Shelves: U1, U2, U3, U4
