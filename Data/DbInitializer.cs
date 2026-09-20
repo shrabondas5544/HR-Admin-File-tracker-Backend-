@@ -28,6 +28,7 @@ public static class DbInitializer
             try
             {
                 context.Database.ExecuteSqlRaw("UPDATE Cabinets SET Description = '' WHERE Description LIKE '%Wall 1%';");
+                context.Database.ExecuteSqlRaw("DELETE FROM Shelves WHERE Section = 'Lower' AND ShelfCode = 'L3';");
             }
             catch { }
 
@@ -115,8 +116,8 @@ public static class DbInitializer
                 });
             }
 
-            // 3 Lower Shelves: L1, L2, L3
-            for (int l = 1; l <= 3; l++)
+            // 2 Lower Shelves: L1, L2
+            for (int l = 1; l <= 2; l++)
             {
                 cabinet.Shelves.Add(new Shelf
                 {
