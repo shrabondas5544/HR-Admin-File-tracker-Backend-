@@ -53,21 +53,61 @@ public class FilesController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<RecordFile>> CreateFile(CreateFileDto dto)
     {
-        if (string.IsNullOrWhiteSpace(dto.Code))
+        var finalCode = dto.Code?.Trim();
+        var finalTitle = dto.Title?.Trim();
+
+        // If code not provided, derive from metadata (employeeNo or staffId) or fallback
+        if (string.IsNullOrWhiteSpace(finalCode))
         {
-            return BadRequest("File code is required.");
+            if (!string.IsNullOrWhiteSpace(dto.MetadataJson))
+            {
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(dto.MetadataJson);
+                    if (doc.RootElement.TryGetProperty("employeeNo", out var empNo) && !string.IsNullOrWhiteSpace(empNo.GetString()))
+                    {
+                        finalCode = empNo.GetString()!.Trim();
+                    }
+                    else if (doc.RootElement.TryGetProperty("staffId", out var staffId) && !string.IsNullOrWhiteSpace(staffId.GetString()))
+                    {
+                        finalCode = staffId.GetString()!.Trim();
+                    }
+                }
+                catch { }
+            }
+
+            if (string.IsNullOrWhiteSpace(finalCode))
+            {
+                finalCode = $"FILE-{DateTime.UtcNow:yyyyMMddHHmmss}";
+            }
         }
 
-        // Ensure unique code among non-deleted files
-        if (await _context.RecordFiles.AnyAsync(f => !f.IsDeleted && f.Code.ToLower() == dto.Code.ToLower()))
+        // If title not provided, derive from employeeName or fallback to code
+        if (string.IsNullOrWhiteSpace(finalTitle))
         {
-            return BadRequest($"A file with code '{dto.Code}' already exists.");
+            if (!string.IsNullOrWhiteSpace(dto.MetadataJson))
+            {
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(dto.MetadataJson);
+                    if (doc.RootElement.TryGetProperty("employeeName", out var empName) && !string.IsNullOrWhiteSpace(empName.GetString()))
+                    {
+                        finalTitle = $"{empName.GetString()!.Trim()} ({finalCode})";
+                    }
+                }
+                catch { }
+            }
+
+            if (string.IsNullOrWhiteSpace(finalTitle))
+            {
+                finalTitle = finalCode;
+            }
         }
 
         var file = new RecordFile
         {
-            Code = dto.Code.Trim(),
-            Title = string.IsNullOrWhiteSpace(dto.Title) ? dto.Code.Trim() : dto.Title.Trim(),
+            Code = finalCode,
+            Title = finalTitle,
             DocumentTypeId = dto.DocumentTypeId,
             MetadataJson = string.IsNullOrWhiteSpace(dto.MetadataJson) ? "{}" : dto.MetadataJson,
             MagazineId = dto.MagazineId,
@@ -106,29 +146,31 @@ public class FilesController : ControllerBase
         var file = await _context.RecordFiles.FindAsync(id);
         if (file == null || file.IsDeleted) return NotFound();
 
-        if (!file.Code.Equals(dto.Code, StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(dto.Code))
         {
-            if (await _context.RecordFiles.AnyAsync(f => f.Id != id && !f.IsDeleted && f.Code.ToLower() == dto.Code.ToLower()))
-            {
-                return BadRequest($"A file with code '{dto.Code}' already exists.");
-            }
+            file.Code = dto.Code.Trim();
         }
 
-        file.Code = dto.Code.Trim();
-        file.Title = string.IsNullOrWhiteSpace(dto.Title) ? dto.Code.Trim() : dto.Title.Trim();
+        if (!string.IsNullOrWhiteSpace(dto.Title))
+        {
+            file.Title = dto.Title.Trim();
+        }
+
         file.DocumentTypeId = dto.DocumentTypeId;
         file.MetadataJson = dto.MetadataJson;
         file.MagazineId = dto.MagazineId;
         file.ShelfId = dto.MagazineId == null ? dto.ShelfId : null;
-        if (dto.AttachmentUrl != null)
         if (dto.AttachmentsJson != null)
         {
             file.AttachmentUrl = dto.AttachmentUrl;
             file.AttachmentName = dto.AttachmentName;
             file.AttachmentsJson = dto.AttachmentsJson;
         }
-        file.AttachmentUrl = dto.AttachmentUrl;
-        file.AttachmentName = dto.AttachmentName;
+        else if (dto.AttachmentUrl != null)
+        {
+            file.AttachmentUrl = dto.AttachmentUrl;
+            file.AttachmentName = dto.AttachmentName;
+        }
         file.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();

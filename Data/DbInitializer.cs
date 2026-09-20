@@ -25,6 +25,18 @@ public static class DbInitializer
         // Check if already seeded
         if (context.Cabinets.Any())
         {
+            var existingBll = context.DocumentTypes.FirstOrDefault(d => d.Name == "BLL");
+            if (existingBll != null && existingBll.FieldsJson.Contains("location"))
+            {
+                existingBll.FieldsJson = JsonSerializer.Serialize(new[]
+                {
+                    new { key = "employeeName", label = "Employee Name", type = "text", required = true },
+                    new { key = "staffId", label = "Staff ID", type = "text", required = true },
+                    new { key = "designation", label = "Designation", type = "text", required = true },
+                    new { key = "department", label = "Department", type = "text", required = true }
+                });
+                context.SaveChanges();
+            }
             return;
         }
 
@@ -52,9 +64,9 @@ public static class DbInitializer
             FieldsJson = JsonSerializer.Serialize(new[]
             {
                 new { key = "employeeName", label = "Employee Name", type = "text", required = true },
+                new { key = "staffId", label = "Staff ID", type = "text", required = true },
                 new { key = "designation", label = "Designation", type = "text", required = true },
-                new { key = "department", label = "Department", type = "text", required = true },
-                new { key = "location", label = "Factory / Office Location", type = "text", required = false }
+                new { key = "department", label = "Department", type = "text", required = true }
             })
         };
 
@@ -261,9 +273,9 @@ public static class DbInitializer
             MetadataJson = JsonSerializer.Serialize(new
             {
                 employeeName = "Shahadat Hossain",
+                staffId = "BLL-ST-0512",
                 designation = "Lead Production Engineer",
-                department = "LED Assembly Plant",
-                location = "Mohakhali Industrial Unit"
+                department = "LED Assembly Plant"
             })
         };
 
@@ -277,9 +289,9 @@ public static class DbInitializer
             MetadataJson = JsonSerializer.Serialize(new
             {
                 employeeName = "Farhana Chowdhury",
+                staffId = "BLL-ST-0789",
                 designation = "Procurement Specialist",
-                department = "Supply Chain & Logistics",
-                location = "Head Office"
+                department = "Supply Chain & Logistics"
             })
         };
 
