@@ -105,26 +105,70 @@ public static class DbInitializer
                 Description = c <= 6 ? "" : $"Wall 2 - 3-Door Unit {c - 6}"
             };
 
-            // 4 Upper Shelves: U1, U2, U3, U4
-            for (int u = 1; u <= 4; u++)
+            if (c <= 6)
             {
-                cabinet.Shelves.Add(new Shelf
+                // Wall 1: Standard 4 Upper, 2 Lower
+                for (int u = 1; u <= 4; u++)
                 {
-                    Section = "Upper",
-                    ShelfCode = $"U{u}",
-                    OrderIndex = u
-                });
+                    cabinet.Shelves.Add(new Shelf
+                    {
+                        Section = "Upper",
+                        ShelfCode = $"U{u}",
+                        OrderIndex = u
+                    });
+                }
+                for (int l = 1; l <= 2; l++)
+                {
+                    cabinet.Shelves.Add(new Shelf
+                    {
+                        Section = "Lower",
+                        ShelfCode = $"L{l}",
+                        OrderIndex = l
+                    });
+                }
             }
-
-            // 2 Lower Shelves: L1, L2
-            for (int l = 1; l <= 2; l++)
+            else
             {
-                cabinet.Shelves.Add(new Shelf
+                // Wall 2: 3-Door modular units with separate 2-Door and 1-Door shelves
+                // 2-Door Module Shelves (U1..U4, L1..L2)
+                for (int u = 1; u <= 4; u++)
                 {
-                    Section = "Lower",
-                    ShelfCode = $"L{l}",
-                    OrderIndex = l
-                });
+                    cabinet.Shelves.Add(new Shelf
+                    {
+                        Section = "Upper",
+                        ShelfCode = $"U{u} (2-Door)",
+                        OrderIndex = u
+                    });
+                }
+                for (int l = 1; l <= 2; l++)
+                {
+                    cabinet.Shelves.Add(new Shelf
+                    {
+                        Section = "Lower",
+                        ShelfCode = $"L{l} (2-Door)",
+                        OrderIndex = l
+                    });
+                }
+
+                // 1-Door Module Shelves (U1..U4, L1..L2)
+                for (int u = 1; u <= 4; u++)
+                {
+                    cabinet.Shelves.Add(new Shelf
+                    {
+                        Section = "Upper",
+                        ShelfCode = $"U{u} (1-Door)",
+                        OrderIndex = u
+                    });
+                }
+                for (int l = 1; l <= 2; l++)
+                {
+                    cabinet.Shelves.Add(new Shelf
+                    {
+                        Section = "Lower",
+                        ShelfCode = $"L{l} (1-Door)",
+                        OrderIndex = l
+                    });
+                }
             }
 
             cabinets.Add(cabinet);
@@ -358,4 +402,3 @@ public static class DbInitializer
         context.SaveChanges();
     }
 }
-
