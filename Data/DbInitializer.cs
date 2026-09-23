@@ -94,15 +94,15 @@ public static class DbInitializer
         context.DocumentTypes.AddRange(telType, bllType, adminGeneralType);
         context.SaveChanges();
 
-        // 2. Seed 6 Cabinets on Wall 1
+        // 2. Seed 6 Cabinets on Wall 1 and 2 Cabinets on Wall 2
         var cabinets = new List<Cabinet>();
-        for (int c = 1; c <= 6; c++)
+        for (int c = 1; c <= 8; c++)
         {
             var cabinet = new Cabinet
             {
                 CabinetNumber = c,
-                Name = $"Cabinet {c}",
-                Description = ""
+                Name = c <= 6 ? $"Cabinet {c}" : $"Cabinet {c - 6} (W2)",
+                Description = c <= 6 ? "" : $"Wall 2 - 3-Door Unit {c - 6}"
             };
 
             // 4 Upper Shelves: U1, U2, U3, U4
