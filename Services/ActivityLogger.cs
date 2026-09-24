@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using CabinetMap.Api.Data;
 using CabinetMap.Api.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace CabinetMap.Api.Services;
 
@@ -44,7 +45,8 @@ public class ActivityLogger : IActivityLogger
         string userDesignation = customUser?.Designation ?? "";
         string userGender = customUser?.Gender ?? "Male";
 
-        if (customUser != null && !string.IsNullOrWhiteSpace(customUser.FullName))
+        // Tier 1: Check customUser passed from DTO / Controller
+        if (customUser != null && !string.IsNullOrWhiteSpace(customUser.FullName) && customUser.FullName != "Anonymous User")
         {
             userId = customUser.Id > 0 ? customUser.Id : userId;
             userName = customUser.FullName;
@@ -65,7 +67,7 @@ public class ActivityLogger : IActivityLogger
             userGender = context.User.FindFirst("Gender")?.Value ?? userGender;
         }
 
-        // Direct JWT Bearer token decode if present
+        // Tier 2: Direct JWT Bearer token decode if present in headers
         if (context != null && (userName == "Anonymous User" || string.IsNullOrWhiteSpace(userName)))
         {
             if (context.Request.Headers.TryGetValue("Authorization", out var authH))
@@ -80,7 +82,7 @@ public class ActivityLogger : IActivityLogger
                         if (handler.CanReadToken(tokenStr))
                         {
                             var jwt = handler.ReadJwtToken(tokenStr);
-                            var sub = jwt.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier || c.Type == "sub")?.Value;
+                            var sub = jwt.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier || c.Type == "sub" || c.Type == "nameid")?.Value;
                             if (int.TryParse(sub, out int subId)) userId = subId;
 
                             var name = jwt.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Name || c.Type == "unique_name" || c.Type == "name")?.Value;
@@ -89,10 +91,10 @@ public class ActivityLogger : IActivityLogger
                             var email = jwt.Claims.FirstOrDefault(c => c.Type == ClaimTypes.Email || c.Type == "email")?.Value;
                             if (!string.IsNullOrEmpty(email)) userEmail = email;
 
-                            var desig = jwt.Claims.FirstOrDefault(c => c.Type == "Designation")?.Value;
+                            var desig = jwt.Claims.FirstOrDefault(c => c.Type == "Designation" || c.Type == "designation")?.Value;
                             if (!string.IsNullOrEmpty(desig)) userDesignation = desig;
 
-                            var gen = jwt.Claims.FirstOrDefault(c => c.Type == "Gender")?.Value;
+                            var gen = jwt.Claims.FirstOrDefault(c => c.Type == "Gender" || c.Type == "gender")?.Value;
                             if (!string.IsNullOrEmpty(gen)) userGender = gen;
                         }
                     }
@@ -101,8 +103,8 @@ public class ActivityLogger : IActivityLogger
             }
         }
 
-        // Check fallback headers passed from frontend (case-insensitive)
-        if (context != null)
+        // Tier 3: Check fallback headers passed from frontend (case-insensitive + URL decoding)
+        if (context != null && (userName == "Anonymous User" || string.IsNullOrWhiteSpace(userName)))
         {
             foreach (var h in context.Request.Headers)
             {
@@ -122,10 +124,52 @@ public class ActivityLogger : IActivityLogger
                     catch { userDesignation = h.Value.ToString(); }
                 }
                 else if (h.Key.Equals("X-User-Gender", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(h.Value))
+                {
                     userGender = h.Value.ToString();
+                }
                 else if (h.Key.Equals("X-User-Id", StringComparison.OrdinalIgnoreCase) && int.TryParse(h.Value.ToString(), out int hParsedId))
+                {
                     userId = hParsedId;
+                }
             }
+        }
+
+        // Tier 4: Database Safety Net - if still Anonymous, look up the active logged-in user in the database
+        if (userName == "Anonymous User" || string.IsNullOrWhiteSpace(userName))
+        {
+            try
+            {
+                // If userEmail or userId was extracted but not userName, look up in DB
+                User? matchedUser = null;
+                if (!string.IsNullOrEmpty(userEmail))
+                {
+                    matchedUser = await _context.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == userEmail.ToLower());
+                }
+                else if (userId.HasValue && userId.Value > 0)
+                {
+                    matchedUser = await _context.Users.FindAsync(userId.Value);
+                }
+
+                // If still not matched, find the most recently logged in user (within last 12 hours)
+                if (matchedUser == null)
+                {
+                    var cutoff = DateTime.UtcNow.AddHours(-12);
+                    matchedUser = await _context.Users
+                        .Where(u => u.LastLoginAt != null && u.LastLoginAt >= cutoff)
+                        .OrderByDescending(u => u.LastLoginAt)
+                        .FirstOrDefaultAsync();
+                }
+
+                if (matchedUser != null)
+                {
+                    userId = matchedUser.Id;
+                    userName = matchedUser.FullName;
+                    userEmail = matchedUser.Email;
+                    userDesignation = string.IsNullOrWhiteSpace(matchedUser.Designation) ? "HR Staff" : matchedUser.Designation;
+                    userGender = string.IsNullOrWhiteSpace(matchedUser.Gender) ? "Male" : matchedUser.Gender;
+                }
+            }
+            catch { }
         }
 
         var log = new ActivityLog
