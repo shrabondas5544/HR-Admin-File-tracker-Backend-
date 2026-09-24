@@ -22,6 +22,41 @@ public static class DbInitializer
         }
         catch { }
 
+        try
+        {
+            context.Database.ExecuteSqlRaw(@"
+                CREATE TABLE IF NOT EXISTS ""Users"" (
+                    ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_Users"" PRIMARY KEY AUTOINCREMENT,
+                    ""FullName"" TEXT NOT NULL,
+                    ""Email"" TEXT NOT NULL,
+                    ""PasswordHash"" TEXT NOT NULL,
+                    ""Designation"" TEXT NOT NULL,
+                    ""Gender"" TEXT NOT NULL DEFAULT 'Male',
+                    ""Role"" TEXT NULL DEFAULT 'User',
+                    ""ResetCode"" TEXT NULL,
+                    ""ResetCodeExpiresAt"" TEXT NULL,
+                    ""CreatedAt"" TEXT NOT NULL,
+                    ""LastLoginAt"" TEXT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS ""IX_Users_Email"" ON ""Users"" (""Email"");
+                CREATE TABLE IF NOT EXISTS ""ActivityLogs"" (
+                    ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_ActivityLogs"" PRIMARY KEY AUTOINCREMENT,
+                    ""UserId"" INTEGER NULL,
+                    ""UserName"" TEXT NULL,
+                    ""UserEmail"" TEXT NULL,
+                    ""UserDesignation"" TEXT NULL,
+                    ""UserGender"" TEXT NULL,
+                    ""ActionType"" TEXT NOT NULL,
+                    ""EntityType"" TEXT NULL,
+                    ""EntityId"" INTEGER NULL,
+                    ""EntityTitle"" TEXT NULL,
+                    ""Details"" TEXT NOT NULL,
+                    ""Timestamp"" TEXT NOT NULL
+                );
+            ");
+        }
+        catch { }
+
         // Seed Admin User if none exists
         if (!context.Users.Any())
         {
