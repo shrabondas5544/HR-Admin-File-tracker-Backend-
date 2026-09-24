@@ -107,11 +107,20 @@ public class ActivityLogger : IActivityLogger
             foreach (var h in context.Request.Headers)
             {
                 if (h.Key.Equals("X-User-Name", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(h.Value))
-                    userName = h.Value.ToString();
+                {
+                    try { userName = Uri.UnescapeDataString(h.Value.ToString()); }
+                    catch { userName = h.Value.ToString(); }
+                }
                 else if (h.Key.Equals("X-User-Email", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(h.Value))
-                    userEmail = h.Value.ToString();
+                {
+                    try { userEmail = Uri.UnescapeDataString(h.Value.ToString()); }
+                    catch { userEmail = h.Value.ToString(); }
+                }
                 else if (h.Key.Equals("X-User-Designation", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(h.Value))
-                    userDesignation = h.Value.ToString();
+                {
+                    try { userDesignation = Uri.UnescapeDataString(h.Value.ToString()); }
+                    catch { userDesignation = h.Value.ToString(); }
+                }
                 else if (h.Key.Equals("X-User-Gender", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(h.Value))
                     userGender = h.Value.ToString();
                 else if (h.Key.Equals("X-User-Id", StringComparison.OrdinalIgnoreCase) && int.TryParse(h.Value.ToString(), out int hParsedId))
