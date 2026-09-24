@@ -234,7 +234,14 @@ public class FilesController : ControllerBase
             entityId: file.Id,
             entityTitle: $"{file.Title} ({file.Code})",
             details: $"Moved file '{file.Title}' [{file.Code}] to {locationDesc}.",
-            httpContext: HttpContext
+            httpContext: HttpContext,
+            customUser: !string.IsNullOrWhiteSpace(dto.UserName) ? new User
+            {
+                FullName = dto.UserName,
+                Email = dto.UserEmail ?? "",
+                Designation = dto.UserDesignation ?? "",
+                Gender = dto.UserGender ?? "Male"
+            } : null
         );
 
         return Ok(file);

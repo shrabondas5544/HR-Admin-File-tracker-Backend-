@@ -118,7 +118,14 @@ public class MagazinesController : ControllerBase
             entityId: magazine.Id,
             entityTitle: $"{magazine.Name} ({magazine.Code})",
             details: $"Moved magazine box '{magazine.Name}' [{magazine.Code}] to {locationDesc}.",
-            httpContext: HttpContext
+            httpContext: HttpContext,
+            customUser: !string.IsNullOrWhiteSpace(dto.UserName) ? new User
+            {
+                FullName = dto.UserName,
+                Email = dto.UserEmail ?? "",
+                Designation = dto.UserDesignation ?? "",
+                Gender = dto.UserGender ?? "Male"
+            } : null
         );
 
         return Ok(magazine);

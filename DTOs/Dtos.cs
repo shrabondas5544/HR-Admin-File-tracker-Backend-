@@ -31,6 +31,10 @@ public class MoveItemDto
     public int? TargetShelfId { get; set; }
     public int? TargetMagazineId { get; set; }
     public int? OrderIndex { get; set; }
+    public string? UserName { get; set; }
+    public string? UserEmail { get; set; }
+    public string? UserDesignation { get; set; }
+    public string? UserGender { get; set; }
 }
 
 public class CreateMagazineDto
