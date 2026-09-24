@@ -15,6 +15,8 @@ public class AppDbContext : DbContext
     public DbSet<Folder> Folders => Set<Folder>();
     public DbSet<RecordFile> RecordFiles => Set<RecordFile>();
     public DbSet<DocumentType> DocumentTypes => Set<DocumentType>();
+    public DbSet<User> Users => Set<User>();
+    public DbSet<ActivityLog> ActivityLogs => Set<ActivityLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -1,6 +1,7 @@
 using CabinetMap.Api.Data;
 using CabinetMap.Api.DTOs;
 using CabinetMap.Api.Models;
+using CabinetMap.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,10 +12,12 @@ namespace CabinetMap.Api.Controllers;
 public class MagazinesController : ControllerBase
 {
     private readonly AppDbContext _context;
+    private readonly IActivityLogger _activityLogger;
 
-    public MagazinesController(AppDbContext context)
+    public MagazinesController(AppDbContext context, IActivityLogger activityLogger)
     {
         _context = context;
+        _activityLogger = activityLogger;
     }
 
     [HttpGet]
@@ -64,9 +67,9 @@ public class MagazinesController : ControllerBase
 
         var magazine = new Magazine
         {
-            Name = dto.Name.Trim(),
             Code = dto.Code.Trim(),
-            ColorHex = string.IsNullOrWhiteSpace(dto.ColorHex) ? "#3B82F6" : dto.ColorHex.Trim(),
+            Name = dto.Name.Trim(),
+            ColorHex = dto.ColorHex ?? "#f59e0b",
             ShelfId = dto.ShelfId,
             OrderIndex = maxOrder + 1,
             CreatedAt = DateTime.UtcNow
@@ -75,30 +78,16 @@ public class MagazinesController : ControllerBase
         _context.Magazines.Add(magazine);
         await _context.SaveChangesAsync();
 
+        await _activityLogger.LogAsync(
+            actionType: "CREATE",
+            entityType: "Magazine",
+            entityId: magazine.Id,
+            entityTitle: $"{magazine.Name} ({magazine.Code})",
+            details: $"Created new magazine box '{magazine.Name}' with code [{magazine.Code}].",
+            httpContext: HttpContext
+        );
+
         return CreatedAtAction(nameof(GetMagazine), new { id = magazine.Id }, magazine);
-    }
-
-    [HttpPut("{id}")]
-    public async Task<IActionResult> UpdateMagazine(int id, UpdateMagazineDto dto)
-    {
-        var magazine = await _context.Magazines.FindAsync(id);
-        if (magazine == null || magazine.IsDeleted) return NotFound();
-
-        if (!magazine.Code.Equals(dto.Code, StringComparison.OrdinalIgnoreCase))
-        {
-            if (await _context.Magazines.AnyAsync(m => m.Id != id && !m.IsDeleted && m.Code.ToLower() == dto.Code.ToLower()))
-            {
-                return BadRequest($"Magazine with code '{dto.Code}' already exists.");
-            }
-        }
-
-        magazine.Name = dto.Name.Trim();
-        magazine.Code = dto.Code.Trim();
-        magazine.ColorHex = dto.ColorHex.Trim();
-        if (dto.ShelfId.HasValue) magazine.ShelfId = dto.ShelfId.Value;
-
-        await _context.SaveChangesAsync();
-        return Ok(magazine);
     }
 
     [HttpPost("{id}/move")]
@@ -109,7 +98,7 @@ public class MagazinesController : ControllerBase
 
         if (!dto.TargetShelfId.HasValue)
         {
-            return BadRequest("Target shelf must be specified.");
+            return BadRequest("Target shelf must be specified for magazine boxes.");
         }
 
         magazine.ShelfId = dto.TargetShelfId.Value;
@@ -120,42 +109,49 @@ public class MagazinesController : ControllerBase
 
         await _context.SaveChangesAsync();
 
+        var shelf = await _context.Shelves.Include(s => s.Cabinet).FirstOrDefaultAsync(s => s.Id == dto.TargetShelfId.Value);
+        var locationDesc = shelf != null ? $"{shelf.Cabinet?.Name} > Shelf {shelf.ShelfCode}" : $"Shelf #{dto.TargetShelfId.Value}";
+
+        await _activityLogger.LogAsync(
+            actionType: "MOVE",
+            entityType: "Magazine",
+            entityId: magazine.Id,
+            entityTitle: $"{magazine.Name} ({magazine.Code})",
+            details: $"Moved magazine box '{magazine.Name}' [{magazine.Code}] to {locationDesc}.",
+            httpContext: HttpContext
+        );
+
         return Ok(magazine);
     }
 
-    // Soft delete magazine with choice of deleting enclosed files or placing them on the shelf
     [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteMagazine(int id, [FromQuery] bool deleteContents = true)
+    public async Task<IActionResult> DeleteMagazine(int id)
     {
-        var magazine = await _context.Magazines
-            .Include(m => m.Files)
-            .FirstOrDefaultAsync(m => m.Id == id);
-
+        var magazine = await _context.Magazines.Include(m => m.Files).FirstOrDefaultAsync(m => m.Id == id);
         if (magazine == null) return NotFound();
 
+        var now = DateTime.UtcNow;
         magazine.IsDeleted = true;
-        magazine.DeletedAt = DateTime.UtcNow;
+        magazine.DeletedAt = now;
 
-        if (deleteContents)
+        // Also soft-delete all child files inside magazine
+        foreach (var file in magazine.Files)
         {
-            // Soft delete all active files inside this magazine box
-            foreach (var f in magazine.Files.Where(f => !f.IsDeleted))
-            {
-                f.IsDeleted = true;
-                f.DeletedAt = DateTime.UtcNow;
-            }
-        }
-        else
-        {
-            // Unpack/unbind files from magazine and keep them directly on the shelf where magazine was located
-            foreach (var f in magazine.Files.Where(f => !f.IsDeleted))
-            {
-                f.MagazineId = null;
-                f.ShelfId = magazine.ShelfId;
-            }
+            file.IsDeleted = true;
+            file.DeletedAt = now;
         }
 
         await _context.SaveChangesAsync();
+
+        await _activityLogger.LogAsync(
+            actionType: "DELETE",
+            entityType: "Magazine",
+            entityId: magazine.Id,
+            entityTitle: $"{magazine.Name} ({magazine.Code})",
+            details: $"Moved magazine box '{magazine.Name}' [{magazine.Code}] and its files to Trash Bin.",
+            httpContext: HttpContext
+        );
+
         return NoContent();
     }
 }

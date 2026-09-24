@@ -22,6 +22,57 @@ public static class DbInitializer
         }
         catch { }
 
+        // Seed Admin User if none exists
+        if (!context.Users.Any())
+        {
+            var hasher = new Microsoft.AspNetCore.Identity.PasswordHasher<User>();
+            var adminUser = new User
+            {
+                FullName = "System Admin",
+                Email = "admin@cabinetmap.com",
+                Designation = "Senior HR Administrator",
+                Gender = "Male",
+                Role = "Admin",
+                CreatedAt = DateTime.UtcNow
+            };
+            adminUser.PasswordHash = hasher.HashPassword(adminUser, "Admin123!");
+            context.Users.Add(adminUser);
+            context.SaveChanges();
+
+            // Seed initial sample audit activity logs
+            context.ActivityLogs.AddRange(
+                new ActivityLog
+                {
+                    UserId = adminUser.Id,
+                    UserName = adminUser.FullName,
+                    UserEmail = adminUser.Email,
+                    UserDesignation = adminUser.Designation,
+                    UserGender = adminUser.Gender,
+                    ActionType = "REGISTER",
+                    EntityType = "User",
+                    EntityId = adminUser.Id,
+                    EntityTitle = adminUser.FullName,
+                    Details = "System Admin initialized the CabinetMap archive database.",
+                    Timestamp = DateTime.UtcNow.AddHours(-2)
+                },
+                new ActivityLog
+                {
+                    UserId = adminUser.Id,
+                    UserName = adminUser.FullName,
+                    UserEmail = adminUser.Email,
+                    UserDesignation = adminUser.Designation,
+                    UserGender = adminUser.Gender,
+                    ActionType = "CREATE",
+                    EntityType = "Cabinet",
+                    EntityId = 1,
+                    EntityTitle = "Cabinet 1 (W1)",
+                    Details = "Initialized Wall 1 and Wall 2 cabinet structures.",
+                    Timestamp = DateTime.UtcNow.AddHours(-1)
+                }
+            );
+            context.SaveChanges();
+        }
+
         // Check if already seeded
         if (context.Cabinets.Any())
         {

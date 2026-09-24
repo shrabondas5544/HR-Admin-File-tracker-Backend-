@@ -1,5 +1,9 @@
+using System.Text;
 using CabinetMap.Api.Data;
+using CabinetMap.Api.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,6 +20,34 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 {
     var dbPath = Path.Combine(builder.Environment.ContentRootPath, "cabinetmap.db");
     options.UseSqlite($"Data Source={dbPath}");
+});
+
+// Configure HttpContextAccessor & Application Services
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IActivityLogger, ActivityLogger>();
+
+// Configure JWT Authentication
+var secretKey = builder.Configuration["Jwt:Secret"] ?? "CabinetMap_Super_Secure_Secret_Key_2026_JWT_Token_Secret!";
+var key = Encoding.UTF8.GetBytes(secretKey);
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.RequireHttpsMetadata = false;
+    options.SaveToken = true;
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = new SymmetricSecurityKey(key),
+        ValidateIssuer = false,
+        ValidateAudience = false,
+        ClockSkew = TimeSpan.Zero
+    };
 });
 
 // Configure CORS for Next.js development and production
@@ -56,6 +88,7 @@ if (app.Environment.IsDevelopment())
 app.UseCors("AllowAll");
 app.UseStaticFiles(); // Serve /uploads/... files
 
+app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 

@@ -1,6 +1,7 @@
 using CabinetMap.Api.Data;
 using CabinetMap.Api.DTOs;
 using CabinetMap.Api.Models;
+using CabinetMap.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,10 +12,12 @@ namespace CabinetMap.Api.Controllers;
 public class TrashController : ControllerBase
 {
     private readonly AppDbContext _context;
+    private readonly IActivityLogger _activityLogger;
 
-    public TrashController(AppDbContext context)
+    public TrashController(AppDbContext context, IActivityLogger activityLogger)
     {
         _context = context;
+        _activityLogger = activityLogger;
     }
 
     // Automatically purge items older than 30 days
@@ -90,24 +93,22 @@ public class TrashController : ControllerBase
             .Where(f => f.IsDeleted)
             .ToListAsync();
 
-        foreach (var fld in folders)
+        foreach (var folder in folders)
         {
-            var deletedAt = fld.DeletedAt ?? now;
+            var deletedAt = folder.DeletedAt ?? now;
             var daysPassed = (now - deletedAt).TotalDays;
             var daysRemaining = Math.Max(0, 30 - (int)daysPassed);
 
-            var loc = fld.Shelf != null 
-                ? $"{fld.Shelf.Cabinet?.Name} > {fld.Shelf.ShelfCode}" 
-                : "Unassigned";
+            var loc = folder.Shelf != null ? $"{folder.Shelf.Cabinet?.Name} > {folder.Shelf.ShelfCode}" : "Unassigned";
 
             trash.Add(new TrashItemDto
             {
                 Type = "Folder",
-                Id = fld.Id,
-                Title = fld.Name,
-                Code = fld.Code,
-                ColorHex = fld.ColorHex,
-                DeletedAt = fld.DeletedAt,
+                Id = folder.Id,
+                Title = folder.Name,
+                Code = folder.Code,
+                ColorHex = folder.ColorHex ?? "#10B981",
+                DeletedAt = folder.DeletedAt,
                 DaysRemaining = daysRemaining,
                 OriginalLocation = loc
             });
@@ -117,6 +118,7 @@ public class TrashController : ControllerBase
         var magazines = await _context.Magazines
             .Include(m => m.Shelf)
                 .ThenInclude(s => s!.Cabinet)
+            .Include(m => m.Files)
             .Where(m => m.IsDeleted)
             .ToListAsync();
 
@@ -126,9 +128,7 @@ public class TrashController : ControllerBase
             var daysPassed = (now - deletedAt).TotalDays;
             var daysRemaining = Math.Max(0, 30 - (int)daysPassed);
 
-            var loc = mag.Shelf != null 
-                ? $"{mag.Shelf.Cabinet?.Name} > {mag.Shelf.ShelfCode}" 
-                : "Unassigned";
+            var loc = mag.Shelf != null ? $"{mag.Shelf.Cabinet?.Name} > {mag.Shelf.ShelfCode}" : "Unassigned";
 
             trash.Add(new TrashItemDto
             {
@@ -136,14 +136,16 @@ public class TrashController : ControllerBase
                 Id = mag.Id,
                 Title = mag.Name,
                 Code = mag.Code,
-                ColorHex = mag.ColorHex,
+                ColorHex = mag.ColorHex ?? "#F59E0B",
                 DeletedAt = mag.DeletedAt,
                 DaysRemaining = daysRemaining,
-                OriginalLocation = loc
+                OriginalLocation = loc,
+                FileCount = mag.Files.Count
             });
         }
 
-        return Ok(trash.OrderByDescending(t => t.DeletedAt));
+        trash.Sort((a, b) => (b.DeletedAt ?? DateTime.MinValue).CompareTo(a.DeletedAt ?? DateTime.MinValue));
+        return Ok(trash);
     }
 
     [HttpPost("restore/{type}/{id}")]
@@ -151,6 +153,9 @@ public class TrashController : ControllerBase
     {
         var defaultShelf = await _context.Shelves.OrderBy(s => s.Id).FirstOrDefaultAsync();
         var defaultShelfId = defaultShelf?.Id ?? 1;
+
+        string itemTitle = "";
+        string itemCode = "";
 
         if (type.Equals("File", StringComparison.OrdinalIgnoreCase))
         {
@@ -162,6 +167,8 @@ public class TrashController : ControllerBase
             {
                 file.ShelfId = defaultShelfId;
             }
+            itemTitle = file.Title;
+            itemCode = file.Code;
         }
         else if (type.Equals("Folder", StringComparison.OrdinalIgnoreCase))
         {
@@ -173,10 +180,12 @@ public class TrashController : ControllerBase
             {
                 folder.ShelfId = defaultShelfId;
             }
+            itemTitle = folder.Name;
+            itemCode = folder.Code;
         }
         else if (type.Equals("Magazine", StringComparison.OrdinalIgnoreCase))
         {
-            var mag = await _context.Magazines.FindAsync(id);
+            var mag = await _context.Magazines.Include(m => m.Files).FirstOrDefaultAsync(m => m.Id == id);
             if (mag == null) return NotFound();
             mag.IsDeleted = false;
             mag.DeletedAt = null;
@@ -184,6 +193,13 @@ public class TrashController : ControllerBase
             {
                 mag.ShelfId = defaultShelfId;
             }
+            foreach (var f in mag.Files)
+            {
+                f.IsDeleted = false;
+                f.DeletedAt = null;
+            }
+            itemTitle = mag.Name;
+            itemCode = mag.Code;
         }
         else
         {
@@ -191,28 +207,43 @@ public class TrashController : ControllerBase
         }
 
         await _context.SaveChangesAsync();
+
+        await _activityLogger.LogAsync(
+            actionType: "RESTORE",
+            entityType: type,
+            entityId: id,
+            entityTitle: $"{itemTitle} ({itemCode})",
+            details: $"Restored {type} '{itemTitle}' [{itemCode}] back from Trash Bin.",
+            httpContext: HttpContext
+        );
+
         return Ok(new { message = $"{type} restored successfully" });
     }
 
     [HttpDelete("permanent/{type}/{id}")]
     public async Task<IActionResult> PermanentDelete(string type, int id)
     {
+        string itemTitle = "";
+
         if (type.Equals("File", StringComparison.OrdinalIgnoreCase))
         {
             var file = await _context.RecordFiles.FindAsync(id);
             if (file == null) return NotFound();
+            itemTitle = $"{file.Title} ({file.Code})";
             _context.RecordFiles.Remove(file);
         }
         else if (type.Equals("Folder", StringComparison.OrdinalIgnoreCase))
         {
             var folder = await _context.Folders.FindAsync(id);
             if (folder == null) return NotFound();
+            itemTitle = $"{folder.Name} ({folder.Code})";
             _context.Folders.Remove(folder);
         }
         else if (type.Equals("Magazine", StringComparison.OrdinalIgnoreCase))
         {
             var mag = await _context.Magazines.Include(m => m.Files).FirstOrDefaultAsync(m => m.Id == id);
             if (mag == null) return NotFound();
+            itemTitle = $"{mag.Name} ({mag.Code})";
             _context.Magazines.Remove(mag);
         }
         else
@@ -221,6 +252,16 @@ public class TrashController : ControllerBase
         }
 
         await _context.SaveChangesAsync();
+
+        await _activityLogger.LogAsync(
+            actionType: "PERMANENT_DELETE",
+            entityType: type,
+            entityId: id,
+            entityTitle: itemTitle,
+            details: $"Permanently deleted {type} '{itemTitle}' from database.",
+            httpContext: HttpContext
+        );
+
         return NoContent();
     }
 
@@ -237,7 +278,16 @@ public class TrashController : ControllerBase
         _context.Magazines.RemoveRange(magazines);
 
         await _context.SaveChangesAsync();
+
+        await _activityLogger.LogAsync(
+            actionType: "EMPTY_TRASH",
+            entityType: "System",
+            entityId: null,
+            entityTitle: "Trash Bin",
+            details: "Emptied all deleted items from Trash Bin permanently.",
+            httpContext: HttpContext
+        );
+
         return Ok(new { message = "Trash emptied successfully" });
     }
 }
-

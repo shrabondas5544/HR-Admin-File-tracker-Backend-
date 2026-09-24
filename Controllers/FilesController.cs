@@ -1,6 +1,7 @@
 using CabinetMap.Api.Data;
 using CabinetMap.Api.DTOs;
 using CabinetMap.Api.Models;
+using CabinetMap.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,10 +12,12 @@ namespace CabinetMap.Api.Controllers;
 public class FilesController : ControllerBase
 {
     private readonly AppDbContext _context;
+    private readonly IActivityLogger _activityLogger;
 
-    public FilesController(AppDbContext context)
+    public FilesController(AppDbContext context, IActivityLogger activityLogger)
     {
         _context = context;
+        _activityLogger = activityLogger;
     }
 
     [HttpGet]
@@ -56,10 +59,9 @@ public class FilesController : ControllerBase
         var finalCode = dto.Code?.Trim();
         var finalTitle = dto.Title?.Trim();
 
-        // If code not provided, derive from metadata (employeeNo or staffId) or fallback
         if (string.IsNullOrWhiteSpace(finalCode))
         {
-            if (!string.IsNullOrWhiteSpace(dto.MetadataJson))
+            if (!string.IsNullOrWhiteSpace(dto.MetadataJson) && dto.MetadataJson.Contains("employeeNo"))
             {
                 try
                 {
@@ -75,33 +77,21 @@ public class FilesController : ControllerBase
                 }
                 catch { }
             }
-
-            if (string.IsNullOrWhiteSpace(finalCode))
-            {
-                finalCode = $"FILE-{DateTime.UtcNow:yyyyMMddHHmmss}";
-            }
         }
 
-        // If title not provided, derive from employeeName or fallback to code
+        if (string.IsNullOrWhiteSpace(finalCode))
+        {
+            finalCode = "FILE-" + DateTime.UtcNow.ToString("yyMMddHHmmss");
+        }
+
         if (string.IsNullOrWhiteSpace(finalTitle))
         {
-            if (!string.IsNullOrWhiteSpace(dto.MetadataJson))
-            {
-                try
-                {
-                    using var doc = System.Text.Json.JsonDocument.Parse(dto.MetadataJson);
-                    if (doc.RootElement.TryGetProperty("employeeName", out var empName) && !string.IsNullOrWhiteSpace(empName.GetString()))
-                    {
-                        finalTitle = $"{empName.GetString()!.Trim()} ({finalCode})";
-                    }
-                }
-                catch { }
-            }
+            finalTitle = "Untitled Record (" + finalCode + ")";
+        }
 
-            if (string.IsNullOrWhiteSpace(finalTitle))
-            {
-                finalTitle = finalCode;
-            }
+        if (await _context.RecordFiles.AnyAsync(f => !f.IsDeleted && f.Code.ToLower() == finalCode.ToLower()))
+        {
+            return BadRequest($"File with code '{finalCode}' already exists.");
         }
 
         var file = new RecordFile
@@ -109,12 +99,12 @@ public class FilesController : ControllerBase
             Code = finalCode,
             Title = finalTitle,
             DocumentTypeId = dto.DocumentTypeId,
-            MetadataJson = string.IsNullOrWhiteSpace(dto.MetadataJson) ? "{}" : dto.MetadataJson,
+            MetadataJson = dto.MetadataJson ?? "{}",
             MagazineId = dto.MagazineId,
             ShelfId = dto.MagazineId == null ? dto.ShelfId : null,
             AttachmentUrl = dto.AttachmentUrl,
             AttachmentName = dto.AttachmentName,
-            AttachmentsJson = string.IsNullOrWhiteSpace(dto.AttachmentsJson) ? "[]" : dto.AttachmentsJson,
+            AttachmentsJson = dto.AttachmentsJson,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -136,6 +126,15 @@ public class FilesController : ControllerBase
 
         _context.RecordFiles.Add(file);
         await _context.SaveChangesAsync();
+
+        await _activityLogger.LogAsync(
+            actionType: "CREATE",
+            entityType: "File",
+            entityId: file.Id,
+            entityTitle: $"{file.Title} ({file.Code})",
+            details: $"Created new record file '{file.Title}' with code [{file.Code}].",
+            httpContext: HttpContext
+        );
 
         return CreatedAtAction(nameof(GetFile), new { id = file.Id }, file);
     }
@@ -174,6 +173,16 @@ public class FilesController : ControllerBase
         file.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
+
+        await _activityLogger.LogAsync(
+            actionType: "UPDATE",
+            entityType: "File",
+            entityId: file.Id,
+            entityTitle: $"{file.Title} ({file.Code})",
+            details: $"Updated metadata details for file '{file.Title}' [{file.Code}].",
+            httpContext: HttpContext
+        );
+
         return Ok(file);
     }
 
@@ -183,22 +192,28 @@ public class FilesController : ControllerBase
         var file = await _context.RecordFiles.FindAsync(id);
         if (file == null || file.IsDeleted) return NotFound();
 
+        string locationDesc = "";
+
         if (dto.TargetMagazineId.HasValue)
         {
             file.MagazineId = dto.TargetMagazineId.Value;
             file.ShelfId = null;
+            var mag = await _context.Magazines.Include(m => m.Shelf).ThenInclude(s => s!.Cabinet).FirstOrDefaultAsync(m => m.Id == dto.TargetMagazineId.Value);
+            locationDesc = mag != null ? $"Magazine Box '{mag.Name}' ({mag.Shelf?.Cabinet?.Name} > Shelf {mag.Shelf?.ShelfCode})" : $"Magazine #{dto.TargetMagazineId.Value}";
         }
         else if (dto.TargetShelfId.HasValue)
         {
             file.ShelfId = dto.TargetShelfId.Value;
             file.MagazineId = null;
+            var shelf = await _context.Shelves.Include(s => s.Cabinet).FirstOrDefaultAsync(s => s.Id == dto.TargetShelfId.Value);
+            locationDesc = shelf != null ? $"{shelf.Cabinet?.Name} > Shelf {shelf.ShelfCode}" : $"Shelf #{dto.TargetShelfId.Value}";
         }
         else if (file.MagazineId.HasValue)
         {
-            // Extract from magazine to magazine's shelf
-            var mag = await _context.Magazines.FindAsync(file.MagazineId.Value);
+            var mag = await _context.Magazines.Include(m => m.Shelf).ThenInclude(s => s!.Cabinet).FirstOrDefaultAsync(m => m.Id == file.MagazineId.Value);
             file.ShelfId = mag?.ShelfId;
             file.MagazineId = null;
+            locationDesc = mag?.Shelf != null ? $"{mag.Shelf.Cabinet?.Name} > Shelf {mag.Shelf.ShelfCode}" : "Cabinet Shelf";
         }
         else
         {
@@ -213,10 +228,18 @@ public class FilesController : ControllerBase
         file.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
 
+        await _activityLogger.LogAsync(
+            actionType: "MOVE",
+            entityType: "File",
+            entityId: file.Id,
+            entityTitle: $"{file.Title} ({file.Code})",
+            details: $"Moved file '{file.Title}' [{file.Code}] to {locationDesc}.",
+            httpContext: HttpContext
+        );
+
         return Ok(file);
     }
 
-    // Soft delete to Trash
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteFile(int id)
     {
@@ -226,6 +249,15 @@ public class FilesController : ControllerBase
         file.IsDeleted = true;
         file.DeletedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
+
+        await _activityLogger.LogAsync(
+            actionType: "DELETE",
+            entityType: "File",
+            entityId: file.Id,
+            entityTitle: $"{file.Title} ({file.Code})",
+            details: $"Moved file '{file.Title}' [{file.Code}] to Trash Bin.",
+            httpContext: HttpContext
+        );
 
         return NoContent();
     }

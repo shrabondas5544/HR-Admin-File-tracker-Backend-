@@ -106,6 +106,7 @@ public class TrashItemDto
     public DateTime? DeletedAt { get; set; }
     public int DaysRemaining { get; set; }
     public string OriginalLocation { get; set; } = string.Empty;
+    public int? FileCount { get; set; }
 }
 
 public class ReorderItemDto

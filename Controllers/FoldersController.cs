@@ -1,6 +1,7 @@
 using CabinetMap.Api.Data;
 using CabinetMap.Api.DTOs;
 using CabinetMap.Api.Models;
+using CabinetMap.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,10 +12,12 @@ namespace CabinetMap.Api.Controllers;
 public class FoldersController : ControllerBase
 {
     private readonly AppDbContext _context;
+    private readonly IActivityLogger _activityLogger;
 
-    public FoldersController(AppDbContext context)
+    public FoldersController(AppDbContext context, IActivityLogger activityLogger)
     {
         _context = context;
+        _activityLogger = activityLogger;
     }
 
     [HttpGet]
@@ -61,53 +64,27 @@ public class FoldersController : ControllerBase
 
         var folder = new Folder
         {
-            Name = dto.Name.Trim(),
             Code = dto.Code.Trim(),
-            ColorHex = string.IsNullOrWhiteSpace(dto.ColorHex) ? "#10B981" : dto.ColorHex.Trim(),
+            Name = dto.Name.Trim(),
+            ColorHex = dto.ColorHex ?? "#10b981",
             ShelfId = dto.ShelfId,
             OrderIndex = maxOrder + 1,
-            AttachmentUrl = dto.AttachmentUrl,
-            AttachmentName = dto.AttachmentName,
-            AttachmentsJson = string.IsNullOrWhiteSpace(dto.AttachmentsJson) ? "[]" : dto.AttachmentsJson,
             CreatedAt = DateTime.UtcNow
         };
 
         _context.Folders.Add(folder);
         await _context.SaveChangesAsync();
 
+        await _activityLogger.LogAsync(
+            actionType: "CREATE",
+            entityType: "Folder",
+            entityId: folder.Id,
+            entityTitle: $"{folder.Name} ({folder.Code})",
+            details: $"Created new folder '{folder.Name}' with code [{folder.Code}].",
+            httpContext: HttpContext
+        );
+
         return CreatedAtAction(nameof(GetFolder), new { id = folder.Id }, folder);
-    }
-
-    [HttpPut("{id}")]
-    public async Task<IActionResult> UpdateFolder(int id, UpdateFolderDto dto)
-    {
-        var folder = await _context.Folders.FindAsync(id);
-        if (folder == null || folder.IsDeleted) return NotFound();
-
-        if (!folder.Code.Equals(dto.Code, StringComparison.OrdinalIgnoreCase))
-        {
-            if (await _context.Folders.AnyAsync(f => f.Id != id && !f.IsDeleted && f.Code.ToLower() == dto.Code.ToLower()))
-            {
-                return BadRequest($"Folder with code '{dto.Code}' already exists.");
-            }
-        }
-
-        folder.Name = dto.Name.Trim();
-        folder.Code = dto.Code.Trim();
-        folder.ColorHex = dto.ColorHex.Trim();
-        if (dto.ShelfId.HasValue) folder.ShelfId = dto.ShelfId.Value;
-        if (dto.AttachmentUrl != null)
-        if (dto.AttachmentsJson != null)
-        {
-            folder.AttachmentUrl = dto.AttachmentUrl;
-            folder.AttachmentName = dto.AttachmentName;
-            folder.AttachmentsJson = dto.AttachmentsJson;
-        }
-        folder.AttachmentUrl = dto.AttachmentUrl;
-        folder.AttachmentName = dto.AttachmentName;
-
-        await _context.SaveChangesAsync();
-        return Ok(folder);
     }
 
     [HttpPost("{id}/move")]
@@ -118,7 +95,7 @@ public class FoldersController : ControllerBase
 
         if (!dto.TargetShelfId.HasValue)
         {
-            return BadRequest("Target shelf must be specified.");
+            return BadRequest("Target shelf must be specified for folders.");
         }
 
         folder.ShelfId = dto.TargetShelfId.Value;
@@ -129,10 +106,21 @@ public class FoldersController : ControllerBase
 
         await _context.SaveChangesAsync();
 
+        var shelf = await _context.Shelves.Include(s => s.Cabinet).FirstOrDefaultAsync(s => s.Id == dto.TargetShelfId.Value);
+        var locationDesc = shelf != null ? $"{shelf.Cabinet?.Name} > Shelf {shelf.ShelfCode}" : $"Shelf #{dto.TargetShelfId.Value}";
+
+        await _activityLogger.LogAsync(
+            actionType: "MOVE",
+            entityType: "Folder",
+            entityId: folder.Id,
+            entityTitle: $"{folder.Name} ({folder.Code})",
+            details: $"Moved folder '{folder.Name}' [{folder.Code}] to {locationDesc}.",
+            httpContext: HttpContext
+        );
+
         return Ok(folder);
     }
 
-    // Soft delete folder to trash
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteFolder(int id)
     {
@@ -142,6 +130,15 @@ public class FoldersController : ControllerBase
         folder.IsDeleted = true;
         folder.DeletedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
+
+        await _activityLogger.LogAsync(
+            actionType: "DELETE",
+            entityType: "Folder",
+            entityId: folder.Id,
+            entityTitle: $"{folder.Name} ({folder.Code})",
+            details: $"Moved folder '{folder.Name}' [{folder.Code}] to Trash Bin.",
+            httpContext: HttpContext
+        );
 
         return NoContent();
     }
